@@ -1,0 +1,61 @@
+name: Claude Issue Triage
+
+on:
+  issues:
+    types: [opened, edited]
+
+jobs:
+  triage:
+    if: |
+      !contains(github.event.issue.body, '@claude') &&
+      !contains(github.event.issue.title, '@claude')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Issue Triage
+        id: claude-triage
+        uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: '--allowedTools "Bash(gh issue view:*),Bash(gh label list:*),Bash(gh issue edit:*),Bash(gh issue comment:*),Bash(gh api:*),Read,Grep,Glob"'
+          prompt: |
+            Estás haciendo triage automático del issue #${{ github.event.issue.number }} en el repo ${{ github.repository }}.
+
+            Pasos:
+            1. Ejecuta `gh issue view ${{ github.event.issue.number }} --repo ${{ github.repository }} --json title,body,comments` para leer el issue y sus comentarios existentes.
+            2. Ejecuta `gh label list --repo ${{ github.repository }}` para ver los labels disponibles. NUNCA inventes labels nuevos, usa solo los que ya existen en el repo.
+            3. Explora el código relevante del repo (game.js, index.html, style.css, README.md) con Read/Grep/Glob para entender dónde vive el problema descrito en el issue.
+            4. Decide qué labels existentes aplican (por ejemplo bug, enhancement, documentation, question, accessibility, good first issue, help wanted, duplicate, invalid, wontfix) y agrégalos con:
+               `gh issue edit ${{ github.event.issue.number }} --repo ${{ github.repository }} --add-label "<label1>,<label2>"`
+               IMPORTANTE: usa solo --add-label, nunca --remove-label. No quites labels que ya estén puestos.
+            5. Redacta un comentario de diagnóstico técnico con esta estructura exacta, empezando por el marcador oculto en la primera línea:
+
+               <!-- claude-triage -->
+               ## 🔍 Diagnóstico automático
+
+               **Resumen:** (1-2 líneas del problema)
+
+               **Ubicación probable:** (archivos y funciones/líneas concretas)
+
+               **Causa raíz estimada:** (explicación técnica)
+
+               **Propuesta de solución:** (pasos accionables para implementar el fix)
+
+               **Criterios de aceptación:** (cómo verificar que quedó resuelto)
+
+               Si el issue es ambiguo o falta información, dilo explícitamente en el diagnóstico y pregunta lo que falta en vez de inventar una causa raíz.
+
+            6. Antes de publicar, revisa los comentarios que ya leíste en el paso 1. Si alguno empieza con el marcador `<!-- claude-triage -->`, actualízalo en vez de crear uno nuevo:
+               `gh api repos/${{ github.repository }}/issues/comments/<comment_id> -X PATCH -f body="<nuevo contenido>"`
+               Si no existe un comentario previo con ese marcador, publica uno nuevo con:
+               `gh issue comment ${{ github.event.issue.number }} --repo ${{ github.repository }} --body "<contenido>"`
